@@ -1,0 +1,28 @@
+# Common
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+
+# Backend (Laravel)
+backend/vendor/
+backend/node_modules/
+backend/public/storage
+backend/public/hot
+backend/storage/*.key
+backend/.phpunit.result.cache
+backend/docker-compose.override.yml
+backend/.env
+
+# Frontend (React/Next)
+frontend/node_modules/
+frontend/build/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.local
