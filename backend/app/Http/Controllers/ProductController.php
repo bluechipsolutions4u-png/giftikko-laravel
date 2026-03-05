@@ -11,7 +11,7 @@ class ProductController extends Controller
      */
     public function index()
     {
-        $products = \App\Models\Product::latest()->get();
+        $products = \App\Models\Product::with('category')->latest()->get();
 
         // Add file_url to each product
         $products = $products->map(function ($product) {
@@ -23,6 +23,8 @@ class ProductController extends Controller
                 'file_type' => $product->file_type,
                 'file_size' => $product->file_size,
                 'file_url' => $product->file_url,
+                'category_id' => $product->category_id,
+                'category' => $product->category,
                 'created_at' => $product->created_at,
                 'updated_at' => $product->updated_at,
             ];
@@ -43,6 +45,7 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'file' => 'required|file|mimes:jpg,jpeg,png,webp,mp4|max:20480', // max 20MB
+            'category_id' => 'nullable|exists:categories,id',
         ]);
 
         if ($request->hasFile('file')) {
@@ -56,6 +59,7 @@ class ProductController extends Controller
                 'file_path' => $filePath,
                 'file_type' => $file->getClientOriginalExtension(),
                 'file_size' => $file->getSize(),
+                'category_id' => $request->category_id,
             ]);
 
             return response()->json([
@@ -86,7 +90,7 @@ class ProductController extends Controller
      */
     public function show($id)
     {
-        $product = \App\Models\Product::find($id);
+        $product = \App\Models\Product::with('category')->find($id);
 
         if (!$product) {
             return response()->json([
@@ -105,6 +109,8 @@ class ProductController extends Controller
                 'file_type' => $product->file_type,
                 'file_size' => $product->file_size,
                 'file_url' => $product->file_url,
+                'category_id' => $product->category_id,
+                'category' => $product->category,
                 'created_at' => $product->created_at,
                 'updated_at' => $product->updated_at,
             ]
@@ -129,6 +135,7 @@ class ProductController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'file' => 'nullable|file|mimes:jpg,jpeg,png,webp,mp4|max:20480', // max 20MB
+            'category_id' => 'nullable|exists:categories,id',
         ]);
 
         // Update basic fields
@@ -137,6 +144,9 @@ class ProductController extends Controller
         }
         if ($request->has('description')) {
             $product->description = $request->description;
+        }
+        if ($request->has('category_id')) {
+            $product->category_id = $request->category_id;
         }
 
         // Handle file upload if new file is provided
@@ -168,6 +178,8 @@ class ProductController extends Controller
                 'file_type' => $product->file_type,
                 'file_size' => $product->file_size,
                 'file_url' => $product->file_url,
+                'category_id' => $product->category_id,
+                'category' => $product->category,
                 'created_at' => $product->created_at,
                 'updated_at' => $product->updated_at,
             ]

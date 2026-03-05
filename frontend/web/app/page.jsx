@@ -28,7 +28,8 @@ export default function HomePage() {
 
   const fetchCategories = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/categories');
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+      const response = await fetch(`${apiUrl}/categories`);
       const data = await response.json();
       
       if (data.success) {

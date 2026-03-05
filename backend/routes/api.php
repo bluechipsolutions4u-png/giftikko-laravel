@@ -14,6 +14,7 @@ Route::get('/products/{id}', [ProductController::class, 'show']);
 
 // Public categories viewing (for web sidebar)
 Route::get('/categories', [CategoryController::class, 'index']);
+Route::get('/categories/{slug}/products', [CategoryController::class, 'productsBySlug']);
 
 // Public frames viewing (for web)
 Route::get('/frames', [FrameController::class, 'getActiveFrames']);

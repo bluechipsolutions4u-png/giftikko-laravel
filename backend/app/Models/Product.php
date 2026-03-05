@@ -11,8 +11,14 @@ class Product extends Model
         'description',
         'file_path',
         'file_type',
-        'file_size'
+        'file_size',
+        'category_id'
     ];
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
 
     // Accessor to get full URL for the file
     public function getFileUrlAttribute()

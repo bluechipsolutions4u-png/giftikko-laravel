@@ -28,6 +28,9 @@ const FrameManager = () => {
   const [submitting, setSubmitting] = useState(false);
   const [frameAspectRatio, setFrameAspectRatio] = useState(3/4);
   const [searchQuery, setSearchQuery] = useState('');
+  const [frameMask, setFrameMask] = useState(null);
+  const [frameListMasks, setFrameListMasks] = useState({});
+  const [currentPhotoIndexes, setCurrentPhotoIndexes] = useState({});
 
   // Cropping states
   const [showCropper, setShowCropper] = useState(false);
@@ -48,6 +51,74 @@ const FrameManager = () => {
     fetchFrames();
     fetchCategories();
   }, []);
+
+  // Auto-rotate sample photos in the grid
+  useEffect(() => {
+    if (frames.length === 0) return;
+    
+    const interval = setInterval(() => {
+      setCurrentPhotoIndexes((prev) => {
+        const newIndexes = { ...prev };
+        frames.forEach((frame) => {
+          const photos = [frame.sample_photo_1, frame.sample_photo_2, frame.sample_photo_3].filter(Boolean);
+          if (photos.length > 0) {
+            const currentIndex = prev[frame.id] || 0;
+            newIndexes[frame.id] = (currentIndex + 1) % photos.length;
+          }
+        });
+        return newIndexes;
+      });
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [frames]);
+
+  // Generate masks for all frames in the list for a perfect clipped preview
+  useEffect(() => {
+    if (frames.length === 0) return;
+
+    frames.forEach(async (frame) => {
+      if (!frame.frame_file || frameListMasks[frame.id]) return;
+
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = frame.frame_file;
+        
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+
+        if (!img.complete || img.naturalWidth === 0) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const newImageData = ctx.createImageData(canvas.width, canvas.height);
+        const newData = newImageData.data;
+
+        // Binary mask logic: any visible pixel (alpha > 5) becomes opaque mask
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] > 5) {
+            newData[i] = 0; newData[i+1] = 0; newData[i+2] = 0; newData[i+3] = 255;
+          } else {
+            newData[i+3] = 0;
+          }
+        }
+
+        ctx.putImageData(newImageData, 0, 0);
+        setFrameListMasks(prev => ({ ...prev, [frame.id]: canvas.toDataURL() }));
+      } catch (e) {
+        console.error("Failed to generate mask for frame list:", frame.id, e);
+      }
+    });
+  }, [frames]);
 
   const fetchFrames = async () => {
     try {
@@ -151,6 +222,20 @@ const FrameManager = () => {
           }
           const ratio = hasTransparency ? (maxX - minX) / (maxY - minY) : img.width / img.height;
           setFrameAspectRatio(ratio);
+
+          // Generate the binary mask for cropping preview
+          const newImageData = ctx.createImageData(canvas.width, canvas.height);
+          const newData = newImageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const alpha = data[i + 3];
+            if (alpha > 5) {
+              newData[i] = 0; newData[i+1] = 0; newData[i+2] = 0; newData[i+3] = 255;
+            } else {
+              newData[i+3] = 0;
+            }
+          }
+          ctx.putImageData(newImageData, 0, 0);
+          setFrameMask(canvas.toDataURL());
         };
         img.src = url;
       } else {
@@ -241,6 +326,7 @@ const FrameManager = () => {
     setEditingFrame(null);
     setPreviews({ frame: null, photo1: null, photo2: null, photo3: null });
     setFrameAspectRatio(3/4);
+    setFrameMask(null);
     setDeletedPhotos({ sample_photo_1: false, sample_photo_2: false, sample_photo_3: false });
   };
 
@@ -282,35 +368,72 @@ const FrameManager = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {filteredFrames.map((frame) => (
-            <div key={frame.id} className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
-              <div className="aspect-square bg-slate-50 relative p-6 flex items-center justify-center">
-                <img src={frame.frame_file} alt={frame.name} className="max-w-full max-h-full object-contain drop-shadow-lg" />
-                <div className="absolute bottom-4 left-4 right-4 flex gap-1 items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  {[frame.sample_photo_1, frame.sample_photo_2, frame.sample_photo_3].filter(Boolean).map((p, i) => (
-                    <div key={i} className="w-8 h-8 rounded-md border-2 border-white shadow-sm overflow-hidden bg-white">
-                      <img src={p} className="w-full h-full object-cover" />
+            {frames.map((frame) => {
+              const photos = [frame.sample_photo_1, frame.sample_photo_2, frame.sample_photo_3].filter(Boolean);
+              const currentIndex = currentPhotoIndexes[frame.id] || 0;
+              const currentPhoto = photos.length > 0 ? photos[currentIndex] : null;
+
+              return (
+                <div key={frame.id} className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
+                  <div className="aspect-square bg-slate-50 relative p-6 flex items-center justify-center overflow-hidden">
+                    {/* Background Sample Photo - Clipped to Shape */}
+                    {currentPhoto && (
+                      <div className="absolute inset-6 flex items-center justify-center">
+                        <img 
+                          src={currentPhoto} 
+                          className="w-full h-full object-cover transition-opacity duration-1000" 
+                          alt="preview"
+                          style={{
+                            WebkitMaskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
+                            maskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
+                            maskSize: '100% 100%',
+                            WebkitMaskSize: '100% 100%',
+                            maskRepeat: 'no-repeat',
+                            WebkitMaskRepeat: 'no-repeat'
+                          }}
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Frame Overlay */}
+                    <img 
+                      src={frame.frame_file} 
+                      alt={frame.name} 
+                      className="relative max-w-full max-h-full object-contain drop-shadow-xl z-10" 
+                    />
+
+                    {/* Hover Indicator Dots */}
+                    {photos.length > 1 && (
+                      <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                        {photos.map((_, i) => (
+                          <div 
+                            key={i} 
+                            className={`w-1.5 h-1.5 rounded-full transition-all ${
+                              i === currentIndex ? 'bg-[#0d3839] w-4' : 'bg-slate-300'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-5 border-t border-slate-50">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-bold text-slate-900 line-clamp-1">{frame.name}</h3>
+                        <p className="text-xs text-slate-400 mt-1">{frame.category?.name || 'General'}</p>
+                      </div>
+                      <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${frame.is_active ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
+                        {frame.is_active ? 'Active' : 'Inactive'}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-              <div className="p-5 border-t border-slate-50">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-slate-900 line-clamp-1">{frame.name}</h3>
-                    <p className="text-xs text-slate-400 mt-1">{frame.category?.name || 'General'}</p>
-                  </div>
-                  <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${frame.is_active ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
-                    {frame.is_active ? 'Active' : 'Inactive'}
+                    <div className="flex gap-2">
+                      <button onClick={() => handleEdit(frame)} className="flex-1 py-2 text-slate-600 bg-slate-50 hover:bg-[#0d3839] hover:text-white rounded-lg transition-all text-sm font-semibold">Edit</button>
+                      <button onClick={() => handleDelete(frame.id)} className="px-4 py-2 text-slate-400 hover:text-red-500 bg-slate-50 rounded-lg transition-all"><Trash2 size={16} /></button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => handleEdit(frame)} className="flex-1 py-2 text-slate-600 bg-slate-50 hover:bg-[#0d3839] hover:text-white rounded-lg transition-all text-sm font-semibold">Edit</button>
-                  <button onClick={() => handleDelete(frame.id)} className="px-4 py-2 text-slate-400 hover:text-red-500 bg-slate-50 rounded-lg transition-all"><Trash2 size={16} /></button>
-                </div>
-              </div>
-            </div>
-          ))}
+              );
+            })}
         </div>
       )}
 
@@ -484,21 +607,44 @@ const FrameManager = () => {
                     onZoomChange={setZoom}
                     onCropComplete={onCropComplete}
                     cropShape="rect"
-                    showGrid={true}
+                    showGrid={false}
                     style={{
-                      containerStyle: { backgroundColor: 'transparent' },
-                      cropAreaStyle: { border: '2px solid rgba(255,255,255,0.5)', boxShadow: '0 0 0 9999em rgba(0,0,0,0.85)' }
+                      containerStyle: { backgroundColor: '#020617' },
+                      cropAreaStyle: { 
+                        border: 'none', 
+                        boxShadow: '0 0 0 9999em rgba(0,0,0,0.85)',
+                        WebkitMaskImage: frameMask ? `url(${frameMask})` : 'none',
+                        maskImage: frameMask ? `url(${frameMask})` : 'none',
+                        maskSize: 'contain',
+                        WebkitMaskSize: 'contain',
+                        maskRepeat: 'no-repeat',
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskPosition: 'center',
+                        WebkitMaskPosition: 'center',
+                      }
                     }}
                   />
                </div>
                
                {previews.frame && (
-                <div className="absolute inset-x-0 bottom-10 flex justify-center pointer-events-none">
-                  <div className="bg-white/10 backdrop-blur-md rounded-2xl px-6 py-3 border border-white/10 text-sm font-bold tracking-wide animate-bounce">
-                    Center the subject within the frame!
-                  </div>
-                </div>
+                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 p-2">
+                    <img 
+                      src={previews.frame} 
+                      className="w-full h-full object-contain opacity-80" 
+                      style={{ 
+                        // Ensure overlay matches the cropper's internal logic
+                        maxHeight: '100%',
+                        maxWidth: '100%'
+                      }}
+                    />
+                 </div>
                )}
+
+               <div className="absolute inset-x-0 bottom-4 flex justify-center pointer-events-none z-20">
+                  <div className="bg-white/10 backdrop-blur-md rounded-2xl px-6 py-2 border border-white/10 text-[10px] font-bold tracking-widest uppercase">
+                    Drag to Position • Scroll to Zoom
+                  </div>
+               </div>
             </div>
             <div className="p-10 bg-slate-900 grid grid-cols-1 md:grid-cols-2 gap-10 items-center rounded-b-[40px]">
                <div>

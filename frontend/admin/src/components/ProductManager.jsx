@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, FileVideo, ImageIcon, Search, Filter } from 'lucide-react';
 import api from '../middleware/apiMiddleware';
+import ImageShapeCropper from './ImageShapeCropper';
 
 const ProductManager = () => {
   const [products, setProducts] = useState([]);
@@ -10,15 +11,31 @@ const ProductManager = () => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    category_id: '',
     file: null
   });
+  const [categories, setCategories] = useState([]);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showCropper, setShowCropper] = useState(false);
+  const [rawImage, setRawImage] = useState(null);
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
   }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get('/admin/categories');
+      if (response.data.success) {
+        setCategories(response.data.categories);
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
 
   const fetchProducts = async () => {
     try {
@@ -37,21 +54,29 @@ const ProductManager = () => {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'video/mp4'];
-      if (!validTypes.includes(file.type)) {
-        alert('Please select a valid file (JPG, PNG, WEBP, or MP4)');
-        e.target.value = '';
-        return;
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setRawImage(reader.result);
+          setShowCropper(true);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setFormData({ ...formData, file });
+        const url = URL.createObjectURL(file);
+        setPreviewUrl(url);
       }
-      if (file.size > 20 * 1024 * 1024) {
-        alert('File size must be less than 20MB');
-        e.target.value = '';
-        return;
-      }
-      setFormData({ ...formData, file });
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
     }
+  };
+
+  const handleCropComplete = (croppedBlob) => {
+    // Create a file from the blob
+    const croppedFile = new File([croppedBlob], `cropped_${Date.now()}.png`, { type: 'image/png' });
+    setFormData({ ...formData, file: croppedFile });
+    const url = URL.createObjectURL(croppedFile);
+    setPreviewUrl(url);
+    setShowCropper(false);
+    setRawImage(null);
   };
 
   const handleSubmit = async (e) => {
@@ -64,6 +89,7 @@ const ProductManager = () => {
       const data = new FormData();
       data.append('name', formData.name);
       if (formData.description) data.append('description', formData.description);
+      if (formData.category_id) data.append('category_id', formData.category_id);
       if (formData.file) data.append('file', formData.file);
 
       let response;
@@ -95,6 +121,7 @@ const ProductManager = () => {
     setFormData({
       name: product.name,
       description: product.description || '',
+      category_id: product.category_id || '',
       file: null
     });
     setPreviewUrl(product.file_url);
@@ -112,7 +139,7 @@ const ProductManager = () => {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', description: '', file: null });
+    setFormData({ name: '', description: '', category_id: '', file: null });
     setEditingProduct(null);
     setPreviewUrl(null);
   };
@@ -283,6 +310,22 @@ const ProductManager = () => {
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={formData.category_id}
+                    onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:ring-1 focus:ring-[#0d3839] focus:border-[#0d3839] outline-none transition-all"
+                  >
+                    <option value="">None (Featured Products)</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Media File {!editingProduct && <span className="text-red-500">*</span>}
                   </label>
                   <div className="relative group">
@@ -342,6 +385,18 @@ const ProductManager = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Shape Cropper Overlay */}
+      {showCropper && (
+        <ImageShapeCropper
+          image={rawImage}
+          onCropComplete={handleCropComplete}
+          onCancel={() => {
+            setShowCropper(false);
+            setRawImage(null);
+          }}
+        />
       )}
     </div>
   );

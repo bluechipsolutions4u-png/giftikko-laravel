@@ -7,6 +7,7 @@ export default function FrameGrid({ categoryName }) {
   const [frames, setFrames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPhotoIndexes, setCurrentPhotoIndexes] = useState({});
+  const [frameMasks, setFrameMasks] = useState({});
 
   useEffect(() => {
     fetchFrames();
@@ -28,6 +29,57 @@ export default function FrameGrid({ categoryName }) {
     }, 3000); // Change every 3 seconds
 
     return () => clearInterval(interval);
+  }, [frames]);
+
+  // Generate silhouettes for a perfect mask on irregular shapes
+  useEffect(() => {
+    if (frames.length === 0) return;
+
+    frames.forEach(async (frame) => {
+      if (!frame.frame_file || frameMasks[frame.id]) return;
+
+      try {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = frame.frame_file;
+        
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+
+        if (!img.complete || img.naturalWidth === 0) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const newImageData = ctx.createImageData(canvas.width, canvas.height);
+        const newData = newImageData.data;
+
+        // Create a silhouette mask: any pixel with color/alpha becomes visible
+        for (let i = 0; i < data.length; i += 4) {
+          const alpha = data[i + 3];
+          if (alpha > 5) { // Any visible pixel (including semi-transparent) becomes opaque in mask
+            newData[i] = 0;
+            newData[i + 1] = 0;
+            newData[i + 2] = 0;
+            newData[i + 3] = 255;
+          } else {
+            newData[i + 3] = 0;
+          }
+        }
+
+        ctx.putImageData(newImageData, 0, 0);
+        setFrameMasks(prev => ({ ...prev, [frame.id]: canvas.toDataURL() }));
+      } catch (e) {
+        console.error("Failed to generate mask for frame:", frame.id, e);
+      }
+    });
   }, [frames]);
 
   const fetchFrames = async () => {
@@ -100,48 +152,55 @@ export default function FrameGrid({ categoryName }) {
 
         return (
           <div key={frame.id} className="group">
-            {/* Frame Container - Maintains aspect ratio of cropped images */}
-            <div className="relative bg-gray-50 rounded-lg overflow-hidden mb-4">
-              <div className="relative w-full p-2">
-                {/* Container for photo with proper sizing */}
-                <div className="relative w-full">
-                  {/* Pre-cropped Sample Photo (Background) - Masked to frame shape */}
-                  {currentPhoto ? (
-                    <>
-                      {/* Photo layer */}
-                      <img
-                        src={currentPhoto}
-                        alt={`${frame.name} sample`}
-                        className="w-full h-auto object-cover transition-opacity duration-500 block"
-                        style={{
-                          WebkitMaskImage: frame.frame_file ? `url(${frame.frame_file})` : 'none',
-                          maskImage: frame.frame_file ? `url(${frame.frame_file})` : 'none',
-                          WebkitMaskSize: '100% 100%',
-                          maskSize: '100% 100%',
-                          WebkitMaskRepeat: 'no-repeat',
-                          maskRepeat: 'no-repeat',
-                          WebkitMaskPosition: 'center center',
-                          maskPosition: 'center center'
-                        }}
-                      />
-                      {/* Frame overlay for visual border */}
-                      {frame.frame_file && (
-                        <img
-                          src={frame.frame_file}
-                          alt={frame.name}
-                          className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <div className="w-full aspect-[3/4] flex items-center justify-center bg-gray-100">
-                      <div className="text-center">
-                        <p className="text-gray-400 font-medium">Upload</p>
-                        <p className="text-gray-400 text-sm">Your Photo</p>
-                      </div>
-                    </div>
+            {/* Frame Container - Maintains aspect ratio of frame and clips image overflow */}
+            <div className="relative bg-gray-50 rounded-lg overflow-hidden mb-4 flex items-center justify-center">
+              <div className="relative w-full">
+                {/* Invisible frame to establish aspect ratio */}
+                {frame.frame_file ? (
+                  <img 
+                    src={frame.frame_file} 
+                    alt="" 
+                    className="w-full h-auto opacity-0 block" 
+                  />
+                ) : (
+                  <div className="aspect-[3/4] w-full" />
+                )}
+
+                {/* Content container clipped to frame bounds */}
+                <div className="absolute inset-0 flex items-center justify-center p-2 overflow-hidden">
+                  {currentPhoto && (
+                    <img
+                      src={currentPhoto}
+                      alt={`${frame.name} sample`}
+                      className="w-full h-full object-cover transition-opacity duration-500"
+                      style={{
+                        WebkitMaskImage: frameMasks[frame.id] ? `url(${frameMasks[frame.id]})` : 'none',
+                        maskImage: frameMasks[frame.id] ? `url(${frameMasks[frame.id]})` : 'none',
+                        WebkitMaskSize: '100% 100%',
+                        maskSize: '100% 100%',
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskRepeat: 'no-repeat'
+                      }}
+                    />
+                  )}
+                  
+                  {frame.frame_file && (
+                    <img
+                      src={frame.frame_file}
+                      alt={frame.name}
+                      className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"
+                    />
                   )}
                 </div>
+
+                {!currentPhoto && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
+                    <div className="text-center">
+                      <p className="text-gray-400 font-medium">Upload</p>
+                      <p className="text-gray-400 text-sm">Your Photo</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

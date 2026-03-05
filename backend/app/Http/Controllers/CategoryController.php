@@ -20,6 +20,50 @@ class CategoryController extends Controller
         ]);
     }
 
+    public function productsBySlug($slug)
+    {
+        // Try to find category by link containing the slug
+        $category = Category::where('link', 'LIKE', "%$slug%")->first();
+
+        if (!$category) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Category not found'
+            ], 404);
+        }
+
+        $products = \App\Models\Product::where('category_id', $category->id)->latest()->get()->map(function ($product) {
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'description' => $product->description,
+                'file_url' => $product->file_url,
+                'file_type' => $product->file_type,
+                'created_at' => $product->created_at,
+            ];
+        });
+
+        $frames = \App\Models\Frame::where('category_id', $category->id)->latest()->get()->map(function ($frame) {
+            return [
+                'id' => $frame->id,
+                'name' => $frame->name,
+                'frame_file' => $frame->frame_file ? url('storage/' . $frame->frame_file) : null,
+                'sample_photos' => array_values(array_filter([
+                    $frame->sample_photo_1 ? url('storage/' . $frame->sample_photo_1) : null,
+                    $frame->sample_photo_2 ? url('storage/' . $frame->sample_photo_2) : null,
+                    $frame->sample_photo_3 ? url('storage/' . $frame->sample_photo_3) : null,
+                ])),
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'category' => $category,
+            'products' => $products,
+            'frames' => $frames
+        ]);
+    }
+
     // Get all categories for admin
     public function adminIndex()
     {
