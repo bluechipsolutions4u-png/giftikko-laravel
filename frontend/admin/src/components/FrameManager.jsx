@@ -24,6 +24,7 @@ const FrameManager = () => {
   const [submitting, setSubmitting] = useState(false);
   const [frameAspectRatio, setFrameAspectRatio] = useState(3/4);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [frameMask, setFrameMask] = useState(null);
   const [frameListMasks, setFrameListMasks] = useState({});
   const [currentPhotoIndexes, setCurrentPhotoIndexes] = useState({});
@@ -360,7 +361,11 @@ const FrameManager = () => {
     setDeleteSamplePhoto(false);
   };
 
-  const filteredFrames = frames.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredFrames = frames.filter(f => {
+    const matchesSearch = f.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || String(f.category_id) === String(selectedCategory);
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div className="space-y-6">
@@ -386,6 +391,35 @@ const FrameManager = () => {
           Add Frame
         </button>
       </div>
+
+      {/* Category Filter Pills */}
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setSelectedCategory('all')}
+            className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
+              selectedCategory === 'all'
+                ? 'bg-[#0d3839] text-white border-[#0d3839]'
+                : 'bg-white text-slate-500 border-slate-200 hover:border-[#0d3839] hover:text-[#0d3839]'
+            }`}
+          >
+            All
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(String(cat.id))}
+              className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition-all ${
+                selectedCategory === String(cat.id)
+                  ? 'bg-[#0d3839] text-white border-[#0d3839]'
+                  : 'bg-white text-slate-500 border-slate-200 hover:border-[#0d3839] hover:text-[#0d3839]'
+              }`}
+            >
+              {cat.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-24">

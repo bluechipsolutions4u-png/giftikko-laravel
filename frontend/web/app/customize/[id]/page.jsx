@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Download, Upload, ArrowLeft, X, Check, Search, RotateCcw } from 'lucide-react';
 import Cropper from 'react-easy-crop';
 
 export default function CustomizePage({ params }) {
   const unwrappedParams = use(params);
   const id = unwrappedParams.id;
+  const router = useRouter();
 
   const [frame, setFrame] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -286,12 +288,12 @@ export default function CustomizePage({ params }) {
         {/* Header */}
         <div className="flex flex-col md:flex-row items-center justify-between mb-12 gap-6 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="flex flex-col md:flex-row items-center gap-6">
-            <Link 
-              href="/products" 
+            <button 
+              onClick={() => router.back()}
               className="w-12 h-12 flex items-center justify-center bg-slate-50 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 rounded-xl transition-all"
             >
               <ArrowLeft size={24} />
-            </Link>
+            </button>
             <div className="text-center md:text-left">
               <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{frame.name}</h1>
               <p className="text-slate-500 font-medium tracking-wide mt-1">Upload your photo to see it in this frame</p>
