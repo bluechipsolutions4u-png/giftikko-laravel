@@ -77,20 +77,47 @@ const FrameManager = () => {
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-        const newImageData = ctx.createImageData(canvas.width, canvas.height);
-        const newData = newImageData.data;
-
-        // Binary mask logic: any visible pixel (alpha > 5) becomes opaque mask
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] > 5) {
-            newData[i] = 0; newData[i+1] = 0; newData[i+2] = 0; newData[i+3] = 255;
-          } else {
-            newData[i+3] = 0;
+        
+        // Find visible bounds to avoid bleeding with transparent padding
+        let minX = canvas.width, maxX = 0, minY = canvas.height, maxY = 0;
+        let hasVisiblePixels = false;
+        for (let y = 0; y < canvas.height; y++) {
+          for (let x = 0; x < canvas.width; x++) {
+            if (data[(y * canvas.width + x) * 4 + 3] > 0) {
+              hasVisiblePixels = true;
+              minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+            }
           }
         }
 
-        ctx.putImageData(newImageData, 0, 0);
-        setFrameListMasks(prev => ({ ...prev, [frame.id]: canvas.toDataURL() }));
+        const visibleWidth = hasVisiblePixels ? (maxX - minX + 1) : canvas.width;
+        const visibleHeight = hasVisiblePixels ? (maxY - minY + 1) : canvas.height;
+        
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = visibleWidth;
+        maskCanvas.height = visibleHeight;
+        const mctx = maskCanvas.getContext('2d');
+        
+        const maskData = mctx.createImageData(visibleWidth, visibleHeight);
+        const md = maskData.data;
+
+        for (let y = 0; y < visibleHeight; y++) {
+          for (let x = 0; x < visibleWidth; x++) {
+            const srcX = (hasVisiblePixels ? minX : 0) + x;
+            const srcY = (hasVisiblePixels ? minY : 0) + y;
+            const srcIdx = (srcY * canvas.width + srcX) * 4;
+            const destIdx = (y * visibleWidth + x) * 4;
+            
+            if (data[srcIdx + 3] > 5) {
+              md[destIdx] = 0; md[destIdx+1] = 0; md[destIdx+2] = 0; md[destIdx+3] = 255;
+            } else {
+              md[destIdx+3] = 0;
+            }
+          }
+        }
+        mctx.putImageData(maskData, 0, 0);
+        setFrameListMasks(prev => ({ ...prev, [frame.id]: maskCanvas.toDataURL() }));
       } catch (e) {
         console.error("Failed to generate mask for frame list:", frame.id, e);
       }
@@ -376,9 +403,12 @@ const FrameManager = () => {
 
               return (
                 <div key={frame.id} className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
-                  <div className="aspect-square bg-slate-50 relative p-6 flex items-center justify-center overflow-hidden">
-                    {/* Common inner container for perfect alignment */}
-                    <div className="w-full h-full relative flex items-center justify-center pointer-events-none">
+                  <div className="aspect-square bg-slate-50 relative p-8 flex items-center justify-center overflow-visible">
+                    {/* Common inner container for perfect alignment - Apply shadow here for true silhouette depth */}
+                    <div 
+                      className="w-full h-full relative flex items-center justify-center pointer-events-none"
+                      style={{ filter: 'drop-shadow(0 8px 25px rgba(0,0,0,0.5))' }}
+                    >
                       {/* Background Sample Photo - Clipped to Shape */}
                       {currentPhoto && (
                         <div className="absolute inset-0 flex items-center justify-center translate-z-0">
@@ -404,7 +434,7 @@ const FrameManager = () => {
                       <img 
                         src={frame.frame_file} 
                         alt={frame.name} 
-                        className="relative max-w-full max-h-full object-contain drop-shadow-xl z-10" 
+                        className="relative max-w-full max-h-full object-contain z-10" 
                       />
                     </div>
                   </div>
