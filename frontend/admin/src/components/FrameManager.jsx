@@ -12,18 +12,14 @@ const FrameManager = () => {
   const [formData, setFormData] = useState({
     name: '',
     frame_file: null,
-    sample_photo_1: null,
-    sample_photo_2: null,
-    sample_photo_3: null,
+    sample_photo: null,
     category_id: '',
     order: 0,
     isActive: true
   });
   const [previews, setPreviews] = useState({
     frame: null,
-    photo1: null,
-    photo2: null,
-    photo3: null
+    photo: null
   });
   const [submitting, setSubmitting] = useState(false);
   const [frameAspectRatio, setFrameAspectRatio] = useState(3/4);
@@ -41,36 +37,17 @@ const FrameManager = () => {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   // Track which photos to delete
-  const [deletedPhotos, setDeletedPhotos] = useState({
-    sample_photo_1: false,
-    sample_photo_2: false,
-    sample_photo_3: false
-  });
+  const [deleteSamplePhoto, setDeleteSamplePhoto] = useState(false);
 
   useEffect(() => {
     fetchFrames();
     fetchCategories();
   }, []);
 
-  // Auto-rotate sample photos in the grid
   useEffect(() => {
     if (frames.length === 0) return;
     
-    const interval = setInterval(() => {
-      setCurrentPhotoIndexes((prev) => {
-        const newIndexes = { ...prev };
-        frames.forEach((frame) => {
-          const photos = [frame.sample_photo_1, frame.sample_photo_2, frame.sample_photo_3].filter(Boolean);
-          if (photos.length > 0) {
-            const currentIndex = prev[frame.id] || 0;
-            newIndexes[frame.id] = (currentIndex + 1) % photos.length;
-          }
-        });
-        return newIndexes;
-      });
-    }, 4000);
-
-    return () => clearInterval(interval);
+    // Auto-rotate logic removed as we are simplifying to a single image
   }, [frames]);
 
   // Generate masks for all frames in the list for a perfect clipped preview
@@ -151,16 +128,13 @@ const FrameManager = () => {
 
   const createCroppedImage = async () => {
     try {
-      const croppedImage = await getCroppedImg(cropImage, croppedAreaPixels);
-      const file = new File([croppedImage], `cropped-${currentCropField}.jpg`, { type: 'image/jpeg' });
-      setFormData({ ...formData, [currentCropField]: file });
+      const croppedImage = await getCroppedImg(cropImage, croppedAreaPixels, frameMask);
+      const file = new File([croppedImage], `sample-photo.png`, { type: 'image/png' });
+      setFormData({ ...formData, sample_photo: file });
       const url = URL.createObjectURL(croppedImage);
-      const previewKey = currentCropField === 'sample_photo_1' ? 'photo1' :
-                         currentCropField === 'sample_photo_2' ? 'photo2' : 'photo3';
-      setPreviews({ ...previews, [previewKey]: url });
+      setPreviews({ ...previews, photo: url });
       setShowCropper(false);
       setCropImage(null);
-      setCurrentCropField(null);
       setCrop({ x: 0, y: 0 });
       setZoom(1);
     } catch (e) {
@@ -169,21 +143,43 @@ const FrameManager = () => {
     }
   };
 
-  const getCroppedImg = (imageSrc, pixelCrop) => {
+  const getCroppedImg = (imageSrc, pixelCrop, maskSrc) => {
     return new Promise((resolve, reject) => {
       const image = new Image();
       image.src = imageSrc;
-      image.onload = () => {
+      image.onload = async () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
+        
         canvas.width = pixelCrop.width;
         canvas.height = pixelCrop.height;
+
+        // 1. Draw the cropped photo
         ctx.drawImage(
           image,
           pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height,
           0, 0, pixelCrop.width, pixelCrop.height
         );
-        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.95);
+
+        // 2. Apply the frame silhouette as a mask if available
+        if (maskSrc) {
+          const mask = new Image();
+          mask.src = maskSrc;
+          try {
+            await new Promise((resolve, reject) => {
+              mask.onload = resolve;
+              mask.onerror = reject;
+            });
+            
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.drawImage(mask, 0, 0, pixelCrop.width, pixelCrop.height);
+            ctx.globalCompositeOperation = 'source-over';
+          } catch (err) {
+            console.error("Mask failed to load in getCroppedImg", err);
+          }
+        }
+
+        canvas.toBlob((blob) => resolve(blob), 'image/png');
       };
       image.onerror = reject;
     });
@@ -223,26 +219,41 @@ const FrameManager = () => {
           const ratio = hasTransparency ? (maxX - minX) / (maxY - minY) : img.width / img.height;
           setFrameAspectRatio(ratio);
 
-          // Generate the binary mask for cropping preview
-          const newImageData = ctx.createImageData(canvas.width, canvas.height);
-          const newData = newImageData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            const alpha = data[i + 3];
-            if (alpha > 5) {
-              newData[i] = 0; newData[i+1] = 0; newData[i+2] = 0; newData[i+3] = 255;
-            } else {
-              newData[i+3] = 0;
+          // Generate the binary mask for cropping preview, CROPPED to visible bounds
+          const visibleWidth = hasTransparency ? (maxX - minX + 1) : canvas.width;
+          const visibleHeight = hasTransparency ? (maxY - minY + 1) : canvas.height;
+          
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = visibleWidth;
+          maskCanvas.height = visibleHeight;
+          const mctx = maskCanvas.getContext('2d');
+          
+          const maskData = mctx.createImageData(visibleWidth, visibleHeight);
+          const md = maskData.data;
+
+          for (let y = 0; y < visibleHeight; y++) {
+            for (let x = 0; x < visibleWidth; x++) {
+              const srcX = (hasTransparency ? minX : 0) + x;
+              const srcY = (hasTransparency ? minY : 0) + y;
+              const srcIdx = (srcY * canvas.width + srcX) * 4;
+              const destIdx = (y * visibleWidth + x) * 4;
+              
+              const alpha = data[srcIdx + 3];
+              if (alpha > 5) {
+                md[destIdx] = 0; md[destIdx+1] = 0; md[destIdx+2] = 0; md[destIdx+3] = 255;
+              } else {
+                md[destIdx+3] = 0;
+              }
             }
           }
-          ctx.putImageData(newImageData, 0, 0);
-          setFrameMask(canvas.toDataURL());
+          mctx.putImageData(maskData, 0, 0);
+          setFrameMask(maskCanvas.toDataURL());
         };
         img.src = url;
       } else {
         if (!formData.frame_file && !editingFrame) return alert('Please upload the Frame PNG file first!');
         const url = URL.createObjectURL(file);
         setCropImage(url);
-        setCurrentCropField(field);
         setShowCropper(true);
       }
     }
@@ -258,14 +269,8 @@ const FrameManager = () => {
       const data = new FormData();
       data.append('name', formData.name);
       if (formData.frame_file) data.append('frame_file', formData.frame_file);
-      if (editingFrame) {
-        if (deletedPhotos.sample_photo_1) data.append('delete_sample_photo_1', '1');
-        if (deletedPhotos.sample_photo_2) data.append('delete_sample_photo_2', '1');
-        if (deletedPhotos.sample_photo_3) data.append('delete_sample_photo_3', '1');
-      }
-      if (formData.sample_photo_1) data.append('sample_photo_1', formData.sample_photo_1);
-      if (formData.sample_photo_2) data.append('sample_photo_2', formData.sample_photo_2);
-      if (formData.sample_photo_3) data.append('sample_photo_3', formData.sample_photo_3);
+      if (editingFrame && deleteSamplePhoto) data.append('delete_sample_photo_1', '1');
+      if (formData.sample_photo) data.append('sample_photo_1', formData.sample_photo);
       if (formData.category_id) data.append('category_id', formData.category_id);
       data.append('order', formData.order);
       data.append('is_active', formData.isActive ? '1' : '0');
@@ -301,9 +306,7 @@ const FrameManager = () => {
     });
     setPreviews({
       frame: frame.frame_file,
-      photo1: frame.sample_photo_1,
-      photo2: frame.sample_photo_2,
-      photo3: frame.sample_photo_3
+      photo: frame.sample_photo_1
     });
     setShowModal(true);
   };
@@ -320,14 +323,14 @@ const FrameManager = () => {
 
   const resetForm = () => {
     setFormData({
-      name: '', frame_file: null, sample_photo_1: null, sample_photo_2: null, sample_photo_3: null,
+      name: '', frame_file: null, sample_photo: null,
       category_id: '', order: 0, isActive: true
     });
     setEditingFrame(null);
-    setPreviews({ frame: null, photo1: null, photo2: null, photo3: null });
+    setPreviews({ frame: null, photo: null });
     setFrameAspectRatio(3/4);
     setFrameMask(null);
-    setDeletedPhotos({ sample_photo_1: false, sample_photo_2: false, sample_photo_3: false });
+    setDeleteSamplePhoto(false);
   };
 
   const filteredFrames = frames.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -368,53 +371,42 @@ const FrameManager = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {frames.map((frame) => {
-              const photos = [frame.sample_photo_1, frame.sample_photo_2, frame.sample_photo_3].filter(Boolean);
-              const currentIndex = currentPhotoIndexes[frame.id] || 0;
-              const currentPhoto = photos.length > 0 ? photos[currentIndex] : null;
+            {filteredFrames.map((frame) => {
+              const currentPhoto = frame.sample_photo_1;
 
               return (
                 <div key={frame.id} className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
                   <div className="aspect-square bg-slate-50 relative p-6 flex items-center justify-center overflow-hidden">
-                    {/* Background Sample Photo - Clipped to Shape */}
-                    {currentPhoto && (
-                      <div className="absolute inset-6 flex items-center justify-center">
-                        <img 
-                          src={currentPhoto} 
-                          className="w-full h-full object-cover transition-opacity duration-1000" 
-                          alt="preview"
-                          style={{
-                            WebkitMaskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
-                            maskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
-                            maskSize: '100% 100%',
-                            WebkitMaskSize: '100% 100%',
-                            maskRepeat: 'no-repeat',
-                            WebkitMaskRepeat: 'no-repeat'
-                          }}
-                        />
-                      </div>
-                    )}
-                    
-                    {/* Frame Overlay */}
-                    <img 
-                      src={frame.frame_file} 
-                      alt={frame.name} 
-                      className="relative max-w-full max-h-full object-contain drop-shadow-xl z-10" 
-                    />
-
-                    {/* Hover Indicator Dots */}
-                    {photos.length > 1 && (
-                      <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                        {photos.map((_, i) => (
-                          <div 
-                            key={i} 
-                            className={`w-1.5 h-1.5 rounded-full transition-all ${
-                              i === currentIndex ? 'bg-[#0d3839] w-4' : 'bg-slate-300'
-                            }`}
+                    {/* Common inner container for perfect alignment */}
+                    <div className="w-full h-full relative flex items-center justify-center pointer-events-none">
+                      {/* Background Sample Photo - Clipped to Shape */}
+                      {currentPhoto && (
+                        <div className="absolute inset-0 flex items-center justify-center translate-z-0">
+                          <img 
+                            src={currentPhoto} 
+                            className="max-w-full max-h-full object-contain transition-opacity duration-1000" 
+                            alt="preview"
+                            style={{
+                              WebkitMaskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
+                              maskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
+                              maskSize: 'contain',
+                              WebkitMaskSize: 'contain',
+                              maskRepeat: 'no-repeat',
+                              WebkitMaskRepeat: 'no-repeat',
+                              maskPosition: 'center',
+                              WebkitMaskPosition: 'center'
+                            }}
                           />
-                        ))}
-                      </div>
-                    )}
+                        </div>
+                      )}
+                      
+                      {/* Frame Overlay */}
+                      <img 
+                        src={frame.frame_file} 
+                        alt={frame.name} 
+                        className="relative max-w-full max-h-full object-contain drop-shadow-xl z-10" 
+                      />
+                    </div>
                   </div>
                   <div className="p-5 border-t border-slate-50">
                     <div className="flex items-start justify-between mb-4">
@@ -503,43 +495,42 @@ const FrameManager = () => {
                 <div className="pt-6 border-t border-slate-100">
                   <div className="flex items-center gap-2 mb-6 ml-1">
                     <Scissors size={20} className="text-[#0d3839]" />
-                    <h3 className="text-lg font-bold">Sample Photos</h3>
+                    <h3 className="text-lg font-bold">Sample Photo</h3>
                     <div className="ml-auto text-xs font-bold text-slate-400 flex items-center gap-1">
                       <Info size={14} />
-                      Images will be auto-cropped to fit the frame shape
+                      Image will be auto-cropped to fit the frame shape
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {['sample_photo_1', 'sample_photo_2', 'sample_photo_3'].map((field, idx) => (
-                      <div key={field} className="relative group">
-                         <input type="file" id={field} onChange={(e) => handleFileChange(e, field)} accept="image/*" className="hidden" />
-                         <label htmlFor={field} className="block aspect-[4/3] bg-slate-50 rounded-2xl border-2 border-dashed border-slate-100 hover:border-slate-200 overflow-hidden cursor-pointer transition-all">
-                            {previews[`photo${idx + 1}`] ? (
-                              <img src={previews[`photo${idx + 1}`]} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
-                                <Plus size={24} />
-                                <span className="text-xs font-bold uppercase tracking-widest">Photo {idx + 1}</span>
-                              </div>
-                            )}
-                         </label>
-                         {previews[`photo${idx + 1}`] && (
-                           <button 
-                             type="button" 
-                             onClick={() => {
-                               const pk = `photo${idx + 1}`;
-                               setPreviews({ ...previews, [pk]: null });
-                               setFormData({ ...formData, [field]: null });
-                               if (editingFrame) setDeletedPhotos({ ...deletedPhotos, [field]: true });
-                             }}
-                             className="absolute -top-2 -right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform z-10"
-                           >
-                             <X size={14} />
-                           </button>
-                         )}
-                      </div>
-                    ))}
+                  <div className="max-w-md mx-auto">
+                    <div className="relative group">
+                       <input type="file" id="sample_photo" onChange={(e) => handleFileChange(e, 'sample_photo')} accept="image/*" className="hidden" />
+                       <label htmlFor="sample_photo" className="block aspect-[4/3] bg-slate-50 rounded-2xl border-2 border-dashed border-slate-100 hover:border-slate-200 overflow-hidden cursor-pointer transition-all relative">
+                          {previews.photo ? (
+                            <div className="w-full h-full flex items-center justify-center p-4">
+                              <img src={previews.photo} className="max-w-full max-h-full object-contain drop-shadow-md" />
+                            </div>
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-400">
+                              <Plus size={24} />
+                              <span className="text-xs font-bold uppercase tracking-widest">Select Sample Photo</span>
+                            </div>
+                          )}
+                       </label>
+                       {previews.photo && (
+                         <button 
+                           type="button" 
+                           onClick={() => {
+                             setPreviews({ ...previews, photo: null });
+                             setFormData({ ...formData, sample_photo: null });
+                             if (editingFrame) setDeleteSamplePhoto(true);
+                           }}
+                           className="absolute -top-2 -right-2 w-7 h-7 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform z-10"
+                         >
+                           <X size={14} />
+                         </button>
+                       )}
+                    </div>
                   </div>
                 </div>
 
