@@ -431,24 +431,30 @@ const FrameManager = () => {
           <p>No frames found</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
             {filteredFrames.map((frame) => {
               const currentPhoto = frame.sample_photo_1;
 
               return (
-                <div key={frame.id} className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
-                  <div className="aspect-square bg-slate-50 relative p-8 flex items-center justify-center overflow-visible">
-                    {/* Common inner container for perfect alignment - Apply shadow here for true silhouette depth */}
-                    <div 
+                <div
+                  key={frame.id}
+                  className="group bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200"
+                >
+                  {/* Image Area */}
+                  <div className="aspect-[3/4] bg-gradient-to-br from-slate-50 to-slate-100 relative p-4 flex items-center justify-center overflow-hidden">
+                    {/* Subtle shimmer on hover */}
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-white/0 group-hover:via-white/20 group-hover:to-transparent transition-all duration-500 z-20 pointer-events-none" />
+
+                    {/* Frame + sample photo stack */}
+                    <div
                       className="w-full h-full relative flex items-center justify-center pointer-events-none"
-                      style={{ filter: 'drop-shadow(0 8px 25px rgba(0,0,0,0.5))' }}
+                      style={{ filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }}
                     >
-                      {/* Background Sample Photo - Clipped to Shape */}
                       {currentPhoto && (
-                        <div className="absolute inset-0 flex items-center justify-center translate-z-0">
-                          <img 
-                            src={currentPhoto} 
-                            className="max-w-full max-h-full object-contain transition-opacity duration-1000" 
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <img
+                            src={currentPhoto}
+                            className="max-w-full max-h-full object-contain"
                             alt="preview"
                             style={{
                               WebkitMaskImage: frameListMasks[frame.id] ? `url(${frameListMasks[frame.id]})` : 'none',
@@ -458,33 +464,54 @@ const FrameManager = () => {
                               maskRepeat: 'no-repeat',
                               WebkitMaskRepeat: 'no-repeat',
                               maskPosition: 'center',
-                              WebkitMaskPosition: 'center'
+                              WebkitMaskPosition: 'center',
                             }}
                           />
                         </div>
                       )}
-                      
-                      {/* Frame Overlay */}
-                      <img 
-                        src={frame.frame_file} 
-                        alt={frame.name} 
-                        className="relative max-w-full max-h-full object-contain z-10" 
+                      <img
+                        src={frame.frame_file}
+                        alt={frame.name}
+                        className="relative max-w-full max-h-full object-contain z-10"
                       />
                     </div>
-                  </div>
-                  <div className="p-5 border-t border-slate-50">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="font-bold text-slate-900 line-clamp-1">{frame.name}</h3>
-                        <p className="text-xs text-slate-400 mt-1">{frame.category?.name || 'General'}</p>
-                      </div>
-                      <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${frame.is_active ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
-                        {frame.is_active ? 'Active' : 'Inactive'}
-                      </div>
+
+                    {/* Status pill — top-right overlay */}
+                    <div className={`absolute top-2 right-2 z-30 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm shadow-sm ${
+                      frame.is_active
+                        ? 'bg-emerald-500/90 text-white'
+                        : 'bg-slate-400/70 text-white'
+                    }`}>
+                      {frame.is_active ? 'Active' : 'Off'}
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleEdit(frame)} className="flex-1 py-2 text-slate-600 bg-slate-50 hover:bg-[#0d3839] hover:text-white rounded-lg transition-all text-sm font-semibold">Edit</button>
-                      <button onClick={() => handleDelete(frame.id)} className="px-4 py-2 text-slate-400 hover:text-red-500 bg-slate-50 rounded-lg transition-all"><Trash2 size={16} /></button>
+
+                    {/* Order badge — bottom-left overlay */}
+                    {frame.order > 0 && (
+                      <div className="absolute bottom-2 left-2 z-30 px-1.5 py-0.5 rounded-md bg-black/30 backdrop-blur-sm text-white text-[9px] font-bold">
+                        #{frame.order}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info Footer */}
+                  <div className="px-3 py-2.5 border-t border-slate-100 bg-white">
+                    <div className="mb-2">
+                      <h3 className="font-semibold text-slate-800 text-sm leading-tight line-clamp-1">{frame.name}</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5 truncate">{frame.category?.name || 'General'}</p>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => handleEdit(frame)}
+                        className="flex-1 py-1.5 text-xs text-slate-600 bg-slate-50 hover:bg-[#0d3839] hover:text-white rounded-lg transition-all font-semibold"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(frame.id)}
+                        className="px-2.5 py-1.5 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-lg transition-all"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
                 </div>
